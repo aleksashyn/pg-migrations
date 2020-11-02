@@ -16,9 +16,23 @@ export default class FsClient {
 
   private createMigrationItem = async (dirName: string, filename: string): Promise<MigrationItem> => {
     const filePath = path.join(dirName, filename);
+    const delimiterIndex = filename.search('[_-]');
+    if (delimiterIndex < 1) {
+      throw Error('Filename pattern invalid. Can not find delimiter _ or -. Pattern <id><delimiter><filename>.sql');
+    }
+    const idValue = filename.substring(0, delimiterIndex);
+    let id;
+    try {
+      id = Number.parseInt(idValue);
+    } catch (e) {
+      throw Error(
+        `Filename pattern invalid. Can not parse ID. Expected number but got ${idValue}. Pattern <id><delimiter><filename>.sql`
+      );
+    }
     const data = await this.readFile(filePath, 'utf-8');
     const hash = crypto.createHash('md5').update(filename).update(data).digest('hex');
     return {
+      id,
       filename,
       data,
       hash,
