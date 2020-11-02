@@ -1,0 +1,2 @@
+--AUTOCOMMIT
+CREATE INDEX CONCURRENTLY test2_index_name ON test2 (name);
