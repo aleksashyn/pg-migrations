@@ -8,14 +8,15 @@ import { MigrationEntry } from './types';
 const CREATE_MIGRATIONS_TABLE = `CREATE TABLE migrations
                                  (
                                      id        BIGSERIAL PRIMARY KEY,
+                                     script_id BIGINT       NOT NULL UNIQUE,
                                      filename  VARCHAR(255) NOT NULL UNIQUE,
                                      timestamp TIMESTAMP    NOT NULL DEFAULT now(),
                                      hash      VARCHAR(32)
                                  );`;
 const MIGRATIONS_TABLE_EXISTS = `SELECT EXISTS(SELECT 1 FROM pg_tables WHERE tablename = 'migrations')`;
-const INSERT_MIGRATION_INIT_QUERY = 'INSERT INTO migrations (id, filename) VALUES (0, $1)';
-const INSERT_MIGRATION_QUERY = 'INSERT INTO migrations (filename, hash) VALUES ($1, $2)';
-const SELECT_EXISTING_MIGRATIONS = 'SELECT * FROM migrations ORDER BY id';
+const INSERT_MIGRATION_INIT_QUERY = 'INSERT INTO migrations (script_id, filename) VALUES (0, $1)';
+const INSERT_MIGRATION_QUERY = 'INSERT INTO migrations (script_id, filename, hash) VALUES ($1, $2, $3)';
+const SELECT_EXISTING_MIGRATIONS = 'SELECT * FROM migrations ORDER BY script_id';
 const UPDATE_MIGRATION_ROW_HASH = 'UPDATE migrations SET hash = $1 WHERE filename = $2';
 
 interface TableExist {
@@ -97,7 +98,7 @@ export default class PgMigrationClient {
   private doMigration = async (migrationScripts: MigrationItem[]) => {
     const migrationEntries = await this.getPersistedMigrations();
     const missedMigrationScripts: MigrationItem[] = [];
-    let lastMigrationEntryId: number = migrationEntries[migrationEntries.length - 1].id;
+    let lastMigrationEntryId: number = migrationEntries[migrationEntries.length - 1].script_id;
     for (const migrationScript of migrationScripts) {
       const migrationEntry = migrationEntries.find((entry) => entry.filename === migrationScript.filename);
       if (migrationEntry == null) {
@@ -123,7 +124,7 @@ export default class PgMigrationClient {
   };
 
   private executeMigrationScript = async (migrationScript: MigrationItem) => {
-    const { filename, data, hash } = migrationScript;
+    const { id, filename, data, hash } = migrationScript;
     try {
       const useAutocommit = data.startsWith('--AUTOCOMMIT');
       let migrationResult: ExecutionResult<never>;
@@ -133,7 +134,7 @@ export default class PgMigrationClient {
       } else {
         migrationResult = await this.databaseClient.executeInTransaction(data);
       }
-      await this.addMigrationEntry(migrationResult, filename, hash);
+      await this.addMigrationEntry(migrationResult, id, filename, hash);
       this.logger.info(`Script ${filename} complete successfully`);
     } catch (error) {
       this.logger.error(`Unable to execute script ${filename}`, error);
@@ -141,9 +142,14 @@ export default class PgMigrationClient {
     }
   };
 
-  private addMigrationEntry = async (migrationResult: ExecutionResult<never>, filename: string, hash: string) => {
+  private addMigrationEntry = async (
+    migrationResult: ExecutionResult<never>,
+    id: number,
+    filename: string,
+    hash: string
+  ) => {
     if (migrationResult.isSuccess) {
-      await this.databaseClient.execute(INSERT_MIGRATION_QUERY, [filename, hash]);
+      await this.databaseClient.execute(INSERT_MIGRATION_QUERY, [id, filename, hash]);
     } else {
       throw new Error(migrationResult.error);
     }
